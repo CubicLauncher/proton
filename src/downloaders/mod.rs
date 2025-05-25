@@ -120,3 +120,50 @@ pub async fn download_libraries(
 
     Ok(())
 }
+
+pub async fn download_natives(
+    game_version: &NormalizedVersion,
+    gamedir: &PathBuf,
+    progress_tx: Option<Sender<DownloadProgress>>,
+) -> Result<(), ProtonError> {
+    let semaphore = Arc::new(Semaphore::new(MAX_CONCURRENT_DOWNLOADS));
+    let counter = Arc::new(AtomicUsize::new(0));
+    let total = game_version.natives.len();
+    let mut tasks = FuturesUnordered::new();
+
+    for native in &game_version.natives {
+        let permit = semaphore.clone().acquire_owned().await.unwrap();
+        let url = native.url.clone();
+        let hash = native.sha1.clone();
+        let path = native.path.clone();
+        let id = game_version.id.clone();
+        let mut file_path = gamedir.clone();
+        file_path.push("libraries");
+        file_path.push(path.clone());
+
+        let counter = counter.clone();
+        let progress_tx = progress_tx.clone();
+
+        tasks.push(tokio::spawn(async move {
+            let result = download_file(&url, file_path, &hash).await;
+            let current = counter.fetch_add(1, Ordering::SeqCst) + 1;
+
+            if let Some(tx) = progress_tx {
+                let _ = tx.send(DownloadProgress {
+                    current,
+                    total,
+                    name: Some(path), // opcionalmente envías el nombre del archivo
+                }).await;
+            }
+
+            drop(permit);
+            result
+        }));
+    }
+
+    while let Some(res) = tasks.next().await {
+        res.unwrap()?; // Propaga errores de descarga
+    }
+
+    Ok(())
+}
