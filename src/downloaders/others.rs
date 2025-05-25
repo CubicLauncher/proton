@@ -1,4 +1,8 @@
-use crate::{errors::ProtonError, manifest::{resolve_version_data, resolve_version_in_manifest}, utilities::download_file};
+use crate::{
+    errors::ProtonError,
+    manifest::{resolve_version_data, resolve_version_in_manifest},
+    utilities::download_file,
+};
 use std::path::PathBuf;
 
 pub async fn download_version_json(
@@ -8,7 +12,7 @@ pub async fn download_version_json(
     let manifest = resolve_version_in_manifest(version_id.clone()).await?;
     download_file(
         &manifest.url,
-        gamedir
+        &gamedir
             .join("versions")
             .join(&version_id)
             .join(format!("{}.json", &version_id)),
@@ -25,7 +29,7 @@ pub async fn download_asset_index(
     let manifest = resolve_version_data(version_id.clone()).await?;
     download_file(
         &manifest.asset_index.url,
-        gamedir
+        &gamedir
             .join("assets")
             .join("indexes")
             .join(format!("{}.json", &manifest.asset_index.id)),

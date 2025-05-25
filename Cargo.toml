@@ -5,10 +5,12 @@ edition = "2024"
 
 
 [dependencies]
+async_zip = { version = "0.0.17", features = ["deflate", "tokio", "tokio-fs"] }
 futures = "0.3.31"
 hex = "0.4.3"
 log = "0.4.27"
 once_cell = "1.21.3"
+os_info = "3.11.0"
 rayon = "1.10.0"
 reqwest = { version = "0.12.15", features = ["json", "stream"] }
 ring = "0.17.14"

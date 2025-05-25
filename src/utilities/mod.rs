@@ -1,12 +1,17 @@
-use std::path::PathBuf;
+use crate::errors::ProtonError;
+use async_zip::tokio::read::fs::ZipFileReader;
+use futures::TryStreamExt;
+use hex;
 use log::warn;
 use once_cell::sync::Lazy;
 use reqwest::Client;
 use ring::digest::{Context, SHA1_FOR_LEGACY_USE_ONLY};
-use tokio::{fs::{create_dir_all, remove_file, rename, File}, io::AsyncWriteExt};
-use hex;
-use futures::TryStreamExt;
-use crate::errors::ProtonError;
+use std::path::Path;
+use std::path::PathBuf;
+use tokio::{
+    fs::{File, create_dir_all, remove_file, rename},
+    io::AsyncWriteExt,
+};
 
 pub static HTTP_CLIENT: Lazy<Client> = Lazy::new(|| {
     Client::builder()
@@ -15,12 +20,11 @@ pub static HTTP_CLIENT: Lazy<Client> = Lazy::new(|| {
         .expect("Failed to build reqwest client")
 });
 
-
 const MAX_DOWNLOAD_ATTEMPTS: usize = 3;
 
 pub async fn download_file(
     url: &str,
-    path: PathBuf,
+    path: &PathBuf,
     expected_hash: &str,
 ) -> Result<(), ProtonError> {
     let temp_file = path.with_extension("tmp");
@@ -29,7 +33,7 @@ pub async fn download_file(
             .get(url)
             .send()
             .await
-            .map_err(|e|ProtonError::RequestError(e))?;
+            .map_err(|e| ProtonError::RequestError(e))?;
 
         // Crea el directorio de destino si no existe
         if let Some(parent_dir) = path.parent() {
@@ -37,7 +41,9 @@ pub async fn download_file(
         }
 
         // Crea archivo de destino
-        let mut file = File::create(&temp_file).await.map_err(|e|ProtonError::IoError(e))?;
+        let mut file = File::create(&temp_file)
+            .await
+            .map_err(|e| ProtonError::IoError(e))?;
 
         // Prepara para cálculo de hash SHA1
         let mut sha1_context = Context::new(&SHA1_FOR_LEGACY_USE_ONLY);
@@ -66,4 +72,72 @@ pub async fn download_file(
     }
 
     Err(ProtonError::HashMismatch)
+}
+
+pub async fn extract_native(
+    jar_path: &Path,
+    destino: &PathBuf,
+) -> Result<(), Box<dyn std::error::Error>> {
+    // Abrir zip
+    let reader = ZipFileReader::new(jar_path).await?;
+
+    for i in 0..reader.file().entries().len() {
+        let entry = &reader.file().entries()[i];
+        let nombre = entry.filename().as_str()?;
+
+        // Abrir reader para la entrada i
+        let mut entry_reader = reader.reader_with_entry(i).await?;
+        let mut contenido = Vec::with_capacity(entry.uncompressed_size() as usize);
+        entry_reader.read_to_end_checked(&mut contenido).await?;
+
+        if nombre.starts_with("META-INF/") {
+            continue;
+        }
+
+        let ruta_salida = destino.join(nombre);
+        println!("{}", ruta_salida.display());
+
+        if let Some(p) = ruta_salida.parent() {
+            create_dir_all(p).await?;
+        }
+
+        let mut archivo = File::create(&ruta_salida).await?;
+        archivo.write_all(&contenido).await?;
+
+        println!("✅ Extraído: {:?}", nombre);
+    }
+
+    Ok(())
+}
+
+pub fn get_os_name_runtime() -> &'static str {
+    use os_info::Type;
+
+    match os_info::get().os_type() {
+        // Linux y distribuciones
+        Type::Linux
+        | Type::Ubuntu
+        | Type::Debian
+        | Type::Arch
+        | Type::Manjaro
+        | Type::Redhat
+        | Type::Fedora
+        | Type::Alpine
+        | Type::OracleLinux
+        | Type::EndeavourOS
+        | Type::Pop
+        | Type::NixOS => "linux",
+
+        // macOS
+        Type::Macos => "macos",
+
+        // Windows
+        Type::Windows => "windows",
+
+        // Otros no soportados
+        other => {
+            println!("⚠️ OS no reconocido: {:?}", other);
+            "unknown"
+        }
+    }
 }
