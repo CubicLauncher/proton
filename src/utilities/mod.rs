@@ -24,14 +24,14 @@ pub static HTTP_CLIENT: Lazy<Client> = Lazy::new(|| {
 const MAX_DOWNLOAD_ATTEMPTS: usize = 3;
 
 pub async fn download_file(
-    url: &str,
-    path: &PathBuf,
-    expected_hash: &str,
+    url: String,
+    path: PathBuf,
+    expected_hash: String,
 ) -> Result<(), ProtonError> {
     let temp_file = path.with_extension("tmp");
     for _attempt in 1..=MAX_DOWNLOAD_ATTEMPTS {
         let response = HTTP_CLIENT
-            .get(url)
+            .get(&url)
             .send()
             .await
             .map_err(|e| ProtonError::RequestError(e))?;
@@ -59,7 +59,7 @@ pub async fn download_file(
         // Verifica el hash
         let actual_hash = hex::encode(sha1_context.finish());
 
-        if &actual_hash == expected_hash {
+        if actual_hash == expected_hash {
             rename(temp_file, path).await?;
             return Ok(());
         } else {
@@ -78,7 +78,7 @@ pub async fn download_file(
 pub async fn extract_native(
     jar_path: &Path,
     destino: &PathBuf,
-) -> Result<(), Box<dyn std::error::Error>> {
+) -> Result<(), ProtonError> {
     // Abrir zip
     let reader = ZipFileReader::new(jar_path).await?;
 
@@ -104,8 +104,6 @@ pub async fn extract_native(
 
         let mut archivo = File::create(&ruta_salida).await?;
         archivo.write_all(&contenido).await?;
-
-        println!("✅ Extraído: {:?}", nombre);
     }
 
     Ok(())

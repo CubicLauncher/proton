@@ -1,11 +1,9 @@
 use std::collections::HashMap;
-
-use serde::{Deserialize};
+use serde::Deserialize;
 
 pub const MANIFEST_URL: &str = "https://manifest.cubicmc.me/manifest";
 pub const VERSION_INDEX_URL: &str = "https://manifest.cubicmc.me/version";
 pub const RESOURCES_BASE_URL: &str = "https://resources.download.minecraft.net/";
-
 
 #[derive(Debug, Deserialize, Clone)]
 pub struct MinecraftVersion {
@@ -13,7 +11,7 @@ pub struct MinecraftVersion {
     pub sha1: String,
     pub release_time: String,
     pub url: String,
-    #[serde(rename="type")]
+    #[serde(rename = "type")]
     pub version_type: String,
 }
 
@@ -91,14 +89,37 @@ pub struct DownloadProgress {
     pub name: Option<String>, // nombre del archivo o asset opcional
 }
 
+// Fixed: Use HashMap instead of Vec<(String, Asset)>
 #[derive(Debug, Deserialize, Clone)]
-
 pub struct VersionAssets {
-    pub objects: HashMap<String, Asset>
+    pub objects: HashMap<String, Asset>,
 }
 
 #[derive(Debug, Deserialize, Clone)]
 pub struct Asset {
     pub hash: String,
-    pub size: usize
+    pub size: usize,
+}
+
+// Helper implementation for VersionAssets to make it easier to work with
+impl VersionAssets {
+    /// Get all assets as a vector of (path, asset) tuples
+    pub fn as_vec(&self) -> Vec<(&String, &Asset)> {
+        self.objects.iter().collect()
+    }
+    
+    /// Get a specific asset by path
+    pub fn get_asset(&self, path: &str) -> Option<&Asset> {
+        self.objects.get(path)
+    }
+    
+    /// Get the total number of assets
+    pub fn len(&self) -> usize {
+        self.objects.len()
+    }
+    
+    /// Check if assets is empty
+    pub fn is_empty(&self) -> bool {
+        self.objects.is_empty()
+    }
 }

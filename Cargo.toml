@@ -6,6 +6,7 @@ edition = "2024"
 
 [dependencies]
 async_zip = { version = "0.0.17", features = ["deflate", "tokio", "tokio-fs"] }
+better-panic = "0.3.0"
 futures = "0.3.31"
 hex = "0.4.3"
 log = "0.4.27"

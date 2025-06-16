@@ -11,12 +11,12 @@ pub async fn download_version_json(
 ) -> Result<(), ProtonError> {
     let manifest = resolve_version_in_manifest(version_id.clone()).await?;
     download_file(
-        &manifest.url,
-        &gamedir
+        manifest.url,
+        gamedir
             .join("versions")
             .join(&version_id)
             .join(format!("{}.json", &version_id)),
-        &manifest.sha1,
+        manifest.sha1,
     )
     .await?;
     Ok(())
@@ -28,12 +28,12 @@ pub async fn download_asset_index(
 ) -> Result<(), ProtonError> {
     let manifest = resolve_version_data(version_id.clone()).await?;
     download_file(
-        &manifest.asset_index.url,
-        &gamedir
+        manifest.asset_index.url,
+        gamedir
             .join("assets")
             .join("indexes")
             .join(format!("{}.json", &manifest.asset_index.id)),
-        &manifest.asset_index.sha1,
+        manifest.asset_index.sha1,
     )
     .await?;
     Ok(())

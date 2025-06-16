@@ -1,8 +1,9 @@
 pub mod types;
 pub mod manifest;
-mod utilities;
+pub mod utilities;
 pub mod errors;
 pub mod downloaders;
+pub mod launcher;
 
 #[cfg(test)]
 mod tests {
