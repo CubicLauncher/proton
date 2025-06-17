@@ -1,4 +1,5 @@
 use crate::errors::ProtonError;
+use crate::types::NormalizedVersion;
 use async_zip::tokio::read::fs::ZipFileReader;
 use futures::TryStreamExt;
 use hex;
@@ -12,7 +13,6 @@ use tokio::{
     fs::{File, create_dir_all, remove_file, rename},
     io::AsyncWriteExt,
 };
-use crate::types::NormalizedVersion;
 
 pub static HTTP_CLIENT: Lazy<Client> = Lazy::new(|| {
     Client::builder()
@@ -75,10 +75,7 @@ pub async fn download_file(
     Err(ProtonError::HashMismatch)
 }
 
-pub async fn extract_native(
-    jar_path: &Path,
-    destino: &PathBuf,
-) -> Result<(), ProtonError> {
+pub async fn extract_native(jar_path: &Path, destino: &PathBuf) -> Result<(), ProtonError> {
     // Abrir zip
     let reader = ZipFileReader::new(jar_path).await?;
 
@@ -125,6 +122,7 @@ pub fn get_os_name_runtime() -> &'static str {
         | Type::OracleLinux
         | Type::EndeavourOS
         | Type::Pop
+        | Type::Void
         | Type::NixOS => "linux",
 
         // macOS
@@ -139,15 +137,4 @@ pub fn get_os_name_runtime() -> &'static str {
             "unknown"
         }
     }
-}
-
-// hace falta probar.
-pub fn resolve_classpath(game_version: &NormalizedVersion) -> Result<Vec<String>, ProtonError> {
-    
-    let libs = game_version.libraries.iter().map(|lib| {
-        let name = lib.name.clone();
-        let path = format!("./lib/{}", name);
-        Ok(path)
-    }).collect::<Result<Vec<String>, ProtonError>>()?;
-    Ok(libs)
 }
