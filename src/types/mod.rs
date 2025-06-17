@@ -4,7 +4,8 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
 // URLs de los manifiestos oficiales de Mojang
-pub const MOJANG_MANIFEST_URL: &str = "https://piston-meta.mojang.com/mc/game/version_manifest_v2.json";
+pub const MOJANG_MANIFEST_URL: &str =
+    "https://piston-meta.mojang.com/mc/game/version_manifest_v2.json";
 pub const RESOURCES_BASE_URL: &str = "https://resources.download.minecraft.net/";
 
 // Tipos de versión
@@ -13,9 +14,9 @@ pub const RESOURCES_BASE_URL: &str = "https://resources.download.minecraft.net/"
 pub enum VersionTypes {
     Snapshot,
     Release,
-    #[serde(rename="old_beta")]
+    #[serde(rename = "old_beta")]
     OldBeta,
-     #[serde(rename="old_alpha")]
+    #[serde(rename = "old_alpha")]
     OldAlpha,
 }
 
@@ -266,6 +267,15 @@ pub struct DownloadProgress {
     pub current: usize,
     pub total: usize,
     pub name: Option<String>,
+    pub download_type: DownloadProgressType,
+    pub version: String,
+}
+
+#[derive(Debug, Clone)]
+pub enum DownloadProgressType {
+    Library,
+    Asset,
+    Native,
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone)]
@@ -285,17 +295,17 @@ impl VersionAssets {
     pub fn as_vec(&self) -> Vec<(&String, &Asset)> {
         self.objects.iter().collect()
     }
-    
+
     /// Obtiene un asset específico por ruta
     pub fn get_asset(&self, path: &str) -> Option<&Asset> {
         self.objects.get(path)
     }
-    
+
     /// Número total de assets
     pub fn len(&self) -> usize {
         self.objects.len()
     }
-    
+
     /// Verifica si no hay assets
     pub fn is_empty(&self) -> bool {
         self.objects.is_empty()
@@ -309,18 +319,18 @@ impl TryFrom<MojangVersionDetails> for NormalizedVersion {
     fn try_from(mojang_version: MojangVersionDetails) -> Result<Self, Self::Error> {
         let assets = mojang_version.asset_index;
         let downloads = mojang_version.downloads;
-        
+
         // Convertir librerías
         let mut libraries = Vec::new();
         let mut natives = Vec::new();
         let mut requires_extraction = Vec::new();
-        
+
         for lib in mojang_version.libraries {
             // Verificar reglas de la librería
             if !library_applies(&lib) {
                 continue;
             }
-            
+
             if let Some(artifact) = lib.downloads.artifact {
                 libraries.push(Library {
                     name: lib.name.clone(),
@@ -330,7 +340,7 @@ impl TryFrom<MojangVersionDetails> for NormalizedVersion {
                     path: artifact.path,
                 });
             }
-            
+
             // Procesar nativos
             if let Some(natives_map) = lib.natives {
                 if let Some(classifier) = natives_map.get(get_os_name_runtime()) {
@@ -343,7 +353,7 @@ impl TryFrom<MojangVersionDetails> for NormalizedVersion {
                             size: native_artifact.size,
                             path: native_artifact.path.clone(),
                         });
-                        
+
                         requires_extraction.push(ExtractionHint {
                             path: native_artifact.path.clone(),
                             requires_extraction: true,
@@ -352,7 +362,7 @@ impl TryFrom<MojangVersionDetails> for NormalizedVersion {
                 }
             }
         }
-        
+
         // Convertir argumentos
         let arguments = match (mojang_version.arguments, mojang_version.minecraft_arguments) {
             (Some(args), _) => normalize_arguments(args),
@@ -362,11 +372,14 @@ impl TryFrom<MojangVersionDetails> for NormalizedVersion {
                 jvm: Vec::new(),
             },
         };
-        
+
         Ok(NormalizedVersion {
             id: mojang_version.id,
             release_time: mojang_version.release_time,
-            java_version: mojang_version.java_version.as_ref().map_or(8, |v| v.major_version),
+            java_version: mojang_version
+                .java_version
+                .as_ref()
+                .map_or(8, |v| v.major_version),
             main_class: mojang_version.main_class,
             client_jar: Downloadable {
                 url: downloads.client.url,
@@ -400,7 +413,7 @@ fn library_applies(lib: &MojangLibrary) -> bool {
 
     let os_name = get_os_name_runtime();
     let mut allow = false;
-    
+
     for rule in &lib.rules {
         let applies = match &rule.os {
             Some(os_rule) => {
@@ -409,7 +422,7 @@ fn library_applies(lib: &MojangLibrary) -> bool {
             }
             None => true,
         };
-        
+
         match rule.action.as_str() {
             "allow" => {
                 if applies {
@@ -424,21 +437,21 @@ fn library_applies(lib: &MojangLibrary) -> bool {
             _ => {}
         }
     }
-    
+
     allow
 }
 
 fn normalize_arguments(args: MojangArguments) -> NormalizedArguments {
     let game = flatten_arguments(args.game);
     let jvm = flatten_arguments(args.jvm);
-    
+
     NormalizedArguments { game, jvm }
 }
 
 fn flatten_arguments(args: Vec<MojangArgumentValue>) -> Vec<String> {
     let mut result = Vec::new();
     let os_name = get_os_name_runtime();
-    
+
     for arg in args {
         match arg {
             MojangArgumentValue::Simple(s) => {
@@ -454,7 +467,7 @@ fn flatten_arguments(args: Vec<MojangArgumentValue>) -> Vec<String> {
             }
         }
     }
-    
+
     result
 }
 
@@ -464,15 +477,13 @@ fn rule_set_applies(rules: &[MojangRule], os_name: &str) -> bool {
     }
 
     let mut allow = false;
-    
+
     for rule in rules {
         let applies = match &rule.os {
-            Some(os_rule) => {
-                os_rule.name.as_ref().map_or(true, |n| n == os_name)
-            }
+            Some(os_rule) => os_rule.name.as_ref().map_or(true, |n| n == os_name),
             None => true,
         };
-        
+
         match rule.action.as_str() {
             "allow" => {
                 if applies {
@@ -487,24 +498,24 @@ fn rule_set_applies(rules: &[MojangRule], os_name: &str) -> bool {
             _ => {}
         }
     }
-    
+
     allow
 }
 
 fn parse_legacy_arguments(args: String) -> NormalizedArguments {
     let mut game_args = Vec::new();
     let mut jvm_args = Vec::new();
-    
+
     // Parsear argumentos del juego
     for arg in args.split_whitespace() {
         game_args.push(arg.to_string());
     }
-    
+
     // Argumentos JVM estándar para versiones antiguas
     jvm_args.push("-Djava.library.path=${natives_directory}".to_string());
     jvm_args.push("-cp".to_string());
     jvm_args.push("${classpath}".to_string());
-    
+
     NormalizedArguments {
         game: game_args,
         jvm: jvm_args,
