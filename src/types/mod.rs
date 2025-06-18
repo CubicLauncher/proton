@@ -262,7 +262,7 @@ pub struct NormalizedArguments {
     pub jvm: Vec<String>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DownloadProgress {
     pub current: usize,
     pub total: usize,
