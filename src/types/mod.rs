@@ -271,7 +271,7 @@ pub struct DownloadProgress {
     pub version: String,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum DownloadProgressType {
     Library,
     Asset,
