@@ -1,6 +1,9 @@
 use crate::errors::ProtonError;
 use crate::manifest::resolve_asset_index;
-use crate::types::{DownloadProgress, DownloadProgressType, NormalizedVersion, RESOURCES_BASE_URL};
+use crate::types::{
+    DownloadProgress, DownloadProgressInfo, DownloadProgressType, NormalizedVersion,
+    RESOURCES_BASE_URL,
+};
 use crate::utilities::{download_file, extract_native};
 use futures::stream::{FuturesUnordered, StreamExt};
 use std::path::PathBuf;
@@ -8,130 +11,132 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use tokio::sync::Semaphore;
 use tokio::sync::mpsc::Sender;
-mod others;
 
-const MAX_DOWNLOAD_ATTEMPTS: usize = 24;
+const MAX_CONCURRENT_DOWNLOADS: usize = 24;
 
 pub struct MinecraftDownloader {
     game_path: PathBuf,
     game_version: NormalizedVersion,
+    natives_dir: PathBuf,
+    objects_dir: PathBuf,
+    libraries_dir: PathBuf,
 }
 
 impl MinecraftDownloader {
-    pub fn new(path: PathBuf, game_version: NormalizedVersion) -> Self {
+    pub fn new(game_path: PathBuf, game_version: NormalizedVersion) -> Self {
+        let natives_dir = game_path.join("natives").join(&game_version.id);
+        let objects_dir = game_path.join("assets").join("objects");
+        let libraries_dir = game_path.join("libraries");
         Self {
-            game_path: path,
+            game_path,
             game_version,
+            natives_dir,
+            objects_dir,
+            libraries_dir,
         }
-    }
-
-    pub async fn download_libraries(
-        &mut self,
-        progress_tx: Option<Sender<DownloadProgress>>,
-    ) -> Result<(), ProtonError> {
-        let semaphore = Arc::new(Semaphore::new(MAX_DOWNLOAD_ATTEMPTS));
-        let counter = Arc::new(AtomicUsize::new(0));
-        let total = self.game_version.libraries.len();
-        let mut tasks = FuturesUnordered::new();
-
-        // Extraer datos necesarios y limpiar self inmediatamente
-        let libraries = std::mem::take(&mut self.game_version.libraries);
-        let libraries_base_path = self.game_path.join("libraries");
-        let version = Arc::new(self.game_version.id.clone());
-        for library in libraries {
-            let semaphore = Arc::clone(&semaphore);
-            let counter = Arc::clone(&counter);
-            let libraries_base_path = libraries_base_path.clone();
-            let progress_tx = progress_tx.clone();
-            let version = Arc::clone(&version);
-            tasks.push(tokio::spawn(async move {
-                let permit = semaphore.acquire_owned().await.unwrap();
-                let current = counter.fetch_add(1, Ordering::SeqCst) + 1;
-
-                // Extraer campos necesarios usando referencias
-                let library_path = libraries_base_path.join(&library.path);
-                let library_url = library.url.clone();
-                let library_sha1 = library.sha1.clone();
-                let library_name = library.path.clone();
-                let result = download_file(library_url, library_path, library_sha1).await;
-
-                // Enviar progreso solo si es necesario
-                if let Some(tx) = progress_tx {
-                    let progress = DownloadProgress {
-                        current,
-                        total,
-                        name: Some(library_name),
-                        download_type: DownloadProgressType::Library,
-                        version: (*version).clone(),
-                    };
-                    let _ = tx.send(progress).await;
-                }
-
-                drop(permit);
-                result
-            }));
-        }
-
-        while let Some(res) = tasks.next().await {
-            res??;
-        }
-        Ok(())
     }
 
     pub async fn download_natives(
         &mut self,
         progress_tx: Option<Sender<DownloadProgress>>,
     ) -> Result<(), ProtonError> {
-        let semaphore = Arc::new(Semaphore::new(MAX_DOWNLOAD_ATTEMPTS));
-        let counter = Arc::new(AtomicUsize::new(0));
+        let semaphore = Arc::new(Semaphore::new(MAX_CONCURRENT_DOWNLOADS));
         let total = self.game_version.natives.len();
-        let mut tasks = FuturesUnordered::new();
-
-        // Extraer y precalcular paths
+        // Como no se usa mas prefiero tomarlo
+        // att: santiagolxx
         let natives = std::mem::take(&mut self.game_version.natives);
-        let libraries_base_path = self.game_path.join("libraries");
-        let natives_extraction_path = self.game_path.join("natives").join(&self.game_version.id);
+        let completed = Arc::new(AtomicUsize::new(0));
+        let mut tasks = FuturesUnordered::new();
+        let natives_dir = Arc::new(self.natives_dir.clone());
+        let game_version = Arc::new(self.game_version.id.clone());
+        let temp_dir = &self
+            .game_path
+            .join("temp")
+            .join(uuid::Uuid::new_v4().to_string());
+
+        tokio::fs::create_dir_all(temp_dir).await?;
 
         for native in natives {
+            let temp_native_path = temp_dir.join(native.path);
+            let completed = Arc::clone(&completed);
             let semaphore = Arc::clone(&semaphore);
-            let counter = Arc::clone(&counter);
-            let libraries_base_path = libraries_base_path.clone();
-            let natives_extraction_path = natives_extraction_path.clone();
-            let progress_tx = progress_tx.clone();
-            let version = Arc::new(self.game_version.id.clone());
+            let natives_dir = Arc::clone(&natives_dir);
+            let tx = progress_tx.clone();
+            let info = DownloadProgressInfo {
+                name: native.name,
+                version: Arc::clone(&game_version),
+            };
             tasks.push(tokio::spawn(async move {
-                let permit = semaphore.acquire_owned().await.unwrap();
-                let current = counter.fetch_add(1, Ordering::SeqCst) + 1;
-                let version = Arc::clone(&version);
-                // Extraer campos necesarios usando clones mínimos
-                let native_path = libraries_base_path.join(&native.path);
-                let native_url = native.url.clone();
-                let native_sha1 = native.sha1.clone();
-                let native_name = native.path.clone();
+                let permit = semaphore.acquire_owned().await;
+                let result = download_file(native.url, &temp_native_path, native.sha1).await;
+                extract_native(&temp_native_path, natives_dir.as_ref()).await?;
+                let count = completed.fetch_add(1, Ordering::Relaxed) + 1;
 
-                let result = download_file(native_url, native_path.clone(), native_sha1).await;
-
-                if let Some(tx) = progress_tx {
-                    let progress = DownloadProgress {
-                        current,
-                        total,
-                        name: Some(native_name),
-                        download_type: DownloadProgressType::Native,
-                        version: (*version).clone(),
-                    };
-                    let _ = tx.send(progress).await;
+                if let Some(tx) = tx {
+                    let _ = tx
+                        .send(DownloadProgress {
+                            current: count,
+                            total,
+                            info: info,
+                            download_type: DownloadProgressType::Native,
+                        })
+                        .await;
                 }
-
-                // Extraer después de descargar
-                if result.is_ok() {
-                    extract_native(&native_path, &natives_extraction_path).await?;
-                }
-
                 drop(permit);
                 result
             }));
         }
+        while let Some(res) = tasks.next().await {
+            res??;
+        }
+        tokio::fs::remove_dir_all(temp_dir).await?;
+        Ok(())
+    }
 
+    pub async fn download_libraries(
+        &mut self,
+        progress_tx: Option<Sender<DownloadProgress>>,
+    ) -> Result<(), ProtonError> {
+        let semaphore = Arc::new(Semaphore::new(MAX_CONCURRENT_DOWNLOADS));
+        let total = self.game_version.libraries.len();
+        // Esto la verdad es lo mismo que el de natives
+        // solo cambia que no se extraen los jars
+        // ni tampoco se necesita el dir temporal.
+        // att: santiagolxx
+        let libraries = std::mem::take(&mut self.game_version.libraries);
+        let completed = Arc::new(AtomicUsize::new(0));
+        let mut tasks = FuturesUnordered::new();
+        let game_version = Arc::new(self.game_version.id.clone());
+
+        for library in libraries {
+            let library_path = self.libraries_dir.join(library.path);
+            let completed = Arc::clone(&completed);
+            let semaphore = Arc::clone(&semaphore);
+            let tx = progress_tx.clone();
+            let info = DownloadProgressInfo {
+                name: library.name,
+                version: Arc::clone(&game_version),
+            };
+
+            tasks.push(tokio::spawn(async move {
+                let permit = semaphore.acquire_owned().await;
+                let result = download_file(library.url, &library_path, library.sha1).await;
+                let count = completed.fetch_add(1, Ordering::Relaxed) + 1;
+
+                if let Some(tx) = tx {
+                    let _ = tx
+                        .send(DownloadProgress {
+                            current: count,
+                            total,
+                            info: info,
+                            download_type: DownloadProgressType::Library,
+                        })
+                        .await;
+                }
+                drop(permit);
+                result
+            }));
+        }
         while let Some(res) = tasks.next().await {
             res??;
         }
@@ -139,63 +144,45 @@ impl MinecraftDownloader {
     }
 
     pub async fn download_assets(
-        &mut self,
+        &self,
         progress_tx: Option<Sender<DownloadProgress>>,
     ) -> Result<(), ProtonError> {
-        let semaphore = Arc::new(Semaphore::new(MAX_DOWNLOAD_ATTEMPTS));
-        let counter = Arc::new(AtomicUsize::new(0));
-
-        // Resolver asset index
+        let semaphore = Arc::new(Semaphore::new(MAX_CONCURRENT_DOWNLOADS));
         let asset_index = resolve_asset_index(&self.game_version).await?;
-        let total = asset_index.objects.len();
         let mut tasks = FuturesUnordered::new();
-        let version = Arc::new(self.game_version.id.clone());
-        // Precalcular path base
-        let assets_objects_path = self.game_path.join("assets").join("objects");
+        let completed = Arc::new(AtomicUsize::new(0));
+        let total = asset_index.len();
+        let game_version = Arc::new(self.game_version.id.clone());
 
-        // Precalcular capacidad de URL para evitar realocaciones
-        let url_base_capacity = RESOURCES_BASE_URL.len() + 70; // Buffer para hash + separadores
-
-        for (name, asset) in asset_index.objects {
+        for (name, asset) in asset_index.as_vec() {
+            let hash = &asset.hash;
             let semaphore = Arc::clone(&semaphore);
-            let counter = Arc::clone(&counter);
-            let assets_objects_path = assets_objects_path.clone();
-            let progress_tx = progress_tx.clone();
-            let version = Arc::clone(&version);
+            let subhash: String = hash.chars().take(2).collect();
+            let url = format!("{}/{}/{}", RESOURCES_BASE_URL, subhash, hash);
+            let path = self.objects_dir.join(&subhash).join(hash);
+            let hash = hash.to_string();
+            let tx = progress_tx.clone();
+            let completed = Arc::clone(&completed);
+            let info = DownloadProgressInfo {
+                name: name,
+                version: Arc::clone(&game_version),
+            };
+
             tasks.push(tokio::spawn(async move {
-                let permit = semaphore.acquire_owned().await.unwrap();
-                let current = counter.fetch_add(1, Ordering::SeqCst) + 1;
+                let permit = semaphore.acquire_owned().await;
+                let result = download_file(url, &path, hash).await;
+                let count = completed.fetch_add(1, Ordering::Relaxed) + 1;
 
-                // Usar slice para subhash sin allocación
-                let asset_hash = &asset.hash;
-                let asset_subhash = &asset_hash[..2];
-
-                // Construir path de forma eficiente
-                let asset_path = assets_objects_path.join(asset_subhash).join(asset_hash);
-
-                // Construir URL de forma eficiente sin format!
-                let mut asset_url = String::with_capacity(url_base_capacity);
-                asset_url.push_str(RESOURCES_BASE_URL);
-                asset_url.push('/');
-                asset_url.push_str(asset_subhash);
-                asset_url.push('/');
-                asset_url.push_str(asset_hash);
-
-                let asset_hash_owned = asset.hash;
-
-                let result = download_file(asset_url, asset_path, asset_hash_owned).await;
-
-                if let Some(tx) = progress_tx {
-                    let progress = DownloadProgress {
-                        current,
-                        total,
-                        name: Some(name),
-                        download_type: DownloadProgressType::Asset,
-                        version: (*version).clone(),
-                    };
-                    let _ = tx.send(progress).await;
+                if let Some(tx) = tx {
+                    let _ = tx
+                        .send(DownloadProgress {
+                            current: count,
+                            total,
+                            info: info,
+                            download_type: DownloadProgressType::Asset,
+                        })
+                        .await;
                 }
-
                 drop(permit);
                 result
             }));
@@ -204,6 +191,7 @@ impl MinecraftDownloader {
         while let Some(res) = tasks.next().await {
             res??;
         }
+
         Ok(())
     }
 }

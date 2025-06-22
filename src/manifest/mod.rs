@@ -44,7 +44,12 @@ pub async fn resolve_version_data(version_id: String) -> Result<NormalizedVersio
         .cloned()
         .ok_or(ProtonError::VersionNotFound(version_id))?;
 
-    let version = HTTP_CLIENT.get(version.url).send().await?.json::<MojangVersionDetails>().await?;
+    let version = HTTP_CLIENT
+        .get(version.url)
+        .send()
+        .await?
+        .json::<MojangVersionDetails>()
+        .await?;
     NormalizedVersion::try_from(version)
 }
 

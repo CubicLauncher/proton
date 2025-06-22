@@ -1,7 +1,7 @@
 use crate::errors::ProtonError;
 use crate::utilities::get_os_name_runtime;
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
+use std::{collections::HashMap, sync::Arc};
 
 // URLs de los manifiestos oficiales de Mojang
 pub const MOJANG_MANIFEST_URL: &str =
@@ -263,14 +263,18 @@ pub struct NormalizedArguments {
 }
 
 #[derive(Debug, Clone)]
+pub struct DownloadProgressInfo {
+    pub name: String,
+    pub version: Arc<String>,
+}
+
+#[derive(Debug, Clone)]
 pub struct DownloadProgress {
     pub current: usize,
     pub total: usize,
-    pub name: Option<String>,
+    pub info: DownloadProgressInfo,
     pub download_type: DownloadProgressType,
-    pub version: String,
 }
-
 #[derive(Debug, Clone)]
 pub enum DownloadProgressType {
     Library,
@@ -292,8 +296,8 @@ pub struct Asset {
 // Implementación de utilidad para VersionAssets
 impl VersionAssets {
     /// Obtiene todos los assets como vector de tuplas (ruta, asset)
-    pub fn as_vec(&self) -> Vec<(&String, &Asset)> {
-        self.objects.iter().collect()
+    pub fn as_vec(mut self) -> Vec<(String, Asset)> {
+        self.objects.drain().collect()
     }
 
     /// Obtiene un asset específico por ruta
