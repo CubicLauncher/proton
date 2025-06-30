@@ -12,7 +12,15 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use tokio::sync::Semaphore;
 use tokio::sync::mpsc::Sender;
 
-const MAX_CONCURRENT_DOWNLOADS: usize = 24;
+use once_cell::sync::Lazy;
+use num_cpus;
+
+// Ajustar el paralelismo dinámicamente en función del hardware disponible.
+static MAX_CONCURRENT_DOWNLOADS: Lazy<usize> = Lazy::new(|| {
+    // 8 tareas por CPU es un buen punto de partida sin saturar recursos.
+    // Se limita a 128 para evitar un exceso de conexiones.
+    std::cmp::min(num_cpus::get() * 8, 128)
+});
 
 pub struct MinecraftDownloader {
     game_path: PathBuf,
@@ -40,7 +48,7 @@ impl MinecraftDownloader {
         &mut self,
         progress_tx: Option<Sender<DownloadProgress>>,
     ) -> Result<(), ProtonError> {
-        let semaphore = Arc::new(Semaphore::new(MAX_CONCURRENT_DOWNLOADS));
+        let semaphore = Arc::new(Semaphore::new(*MAX_CONCURRENT_DOWNLOADS));
         let total = self.game_version.natives.len();
         // Como no se usa mas prefiero tomarlo
         // att: santiagolxx
@@ -97,7 +105,7 @@ impl MinecraftDownloader {
         &mut self,
         progress_tx: Option<Sender<DownloadProgress>>,
     ) -> Result<(), ProtonError> {
-        let semaphore = Arc::new(Semaphore::new(MAX_CONCURRENT_DOWNLOADS));
+        let semaphore = Arc::new(Semaphore::new(*MAX_CONCURRENT_DOWNLOADS));
         let total = self.game_version.libraries.len();
         // Esto la verdad es lo mismo que el de natives
         // solo cambia que no se extraen los jars
@@ -147,7 +155,7 @@ impl MinecraftDownloader {
         &self,
         progress_tx: Option<Sender<DownloadProgress>>,
     ) -> Result<(), ProtonError> {
-        let semaphore = Arc::new(Semaphore::new(MAX_CONCURRENT_DOWNLOADS));
+        let semaphore = Arc::new(Semaphore::new(*MAX_CONCURRENT_DOWNLOADS));
         let asset_index = resolve_asset_index(&self.game_version).await?;
         let mut tasks = FuturesUnordered::new();
         let completed = Arc::new(AtomicUsize::new(0));

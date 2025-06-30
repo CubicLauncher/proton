@@ -5,17 +5,23 @@ use hex;
 use log::{error, info, warn};
 use once_cell::sync::Lazy;
 use reqwest::Client;
+use std::time::Duration;
 use ring::digest::{Context, SHA1_FOR_LEGACY_USE_ONLY};
 use std::path::PathBuf;
 use tokio::{
     fs::{File, create_dir_all, remove_file, rename},
     io::{AsyncReadExt, AsyncWriteExt},
-    time::Duration,
 };
 
 pub static HTTP_CLIENT: Lazy<Client> = Lazy::new(|| {
     Client::builder()
         .user_agent("Cubic Proton/1.0")
+        // Mantiene las conexiones vivas para descargas consecutivas
+        .tcp_keepalive(Duration::from_secs(60))
+        // Reusa conexiones HTTP/1 y HTTP/2 de forma agresiva
+        .pool_idle_timeout(Duration::from_secs(90))
+        .pool_max_idle_per_host(64)
+        // Intenta priorizar HTTP/2 si el servidor lo soporta
         .build()
         .expect("Failed to build reqwest client")
 });
@@ -98,14 +104,16 @@ pub async fn download_file(
             }
         };
 
-        // Crear archivo temporal
-        let mut file = match File::create(&temp_file).await {
+        // Crear archivo temporal con un buffer para minimizar syscalls
+        let file = match File::create(&temp_file).await {
             Ok(f) => f,
             Err(e) => {
                 error!("Failed to create temp file {:?}: {}", temp_file, e);
                 return Err(ProtonError::IoError(e));
             }
         };
+        use tokio::io::BufWriter;
+        let mut writer = BufWriter::with_capacity(32 * 1024, file);
 
         // Prepara para cálculo de hash SHA1
         let mut sha1_context = Context::new(&SHA1_FOR_LEGACY_USE_ONLY);
@@ -113,18 +121,12 @@ pub async fn download_file(
         let mut bytes_written = 0u64;
 
         let write_result: Result<(), ProtonError> = async {
-            loop {
-                match stream.try_next().await {
-                    Ok(Some(chunk)) => {
-                        sha1_context.update(&chunk);
-                        file.write_all(&chunk).await?;
-                        bytes_written += chunk.len() as u64;
-                    }
-                    Ok(None) => break,
-                    Err(e) => return Err(ProtonError::RequestError(e)),
-                }
+            while let Some(chunk) = stream.try_next().await? {
+                sha1_context.update(&chunk);
+                writer.write_all(&chunk).await?;
+                bytes_written += chunk.len() as u64;
             }
-            file.flush().await?;
+            writer.flush().await?;
             Ok(())
         }
         .await;
@@ -134,6 +136,8 @@ pub async fn download_file(
                 // Verificar hash
                 let actual_hash = hex::encode(sha1_context.finish());
                 if actual_hash == expected_hash {
+                    // Cerrar el handler antes de renombrar el archivo (Windows compatibility)
+                    drop(writer);
                     // Mover archivo temporal al destino final
                     match rename(&temp_file, &path).await {
                         Ok(()) => {
