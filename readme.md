@@ -1,4 +1,5 @@
 # Proton
+[![dependency status](https://deps.rs/repo/github/cubiclauncher/proton/status.svg)](https://deps.rs/repo/github/cubiclauncher/proton)
 
 Una librería de Rust de alto rendimiento para descargar versiones de Minecraft de forma rápida y eficiente.
 
