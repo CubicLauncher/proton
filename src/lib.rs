@@ -6,7 +6,7 @@ mod utilities;
 
 pub use downloaders::MinecraftDownloader;
 pub use manifest::resolve_version_data;
-
+pub use types::{DownloadProgress, DownloadProgressType};
 #[cfg(test)]
 mod tests {
     // #[test]
