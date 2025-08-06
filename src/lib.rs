@@ -1,8 +1,11 @@
-pub mod downloaders;
-pub mod errors;
-pub mod manifest;
-pub mod types;
-pub mod utilities;
+mod downloaders;
+mod errors;
+mod manifest;
+mod types;
+mod utilities;
+
+pub use downloaders::MinecraftDownloader;
+pub use manifest::resolve_version_data;
 
 #[cfg(test)]
 mod tests {

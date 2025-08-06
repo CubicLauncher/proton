@@ -280,6 +280,7 @@ pub enum DownloadProgressType {
     Library,
     Asset,
     Native,
+    Client,
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone)]
