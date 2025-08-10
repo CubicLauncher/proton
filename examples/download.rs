@@ -37,4 +37,6 @@ async fn main() {
 
     // Esperar a que termine el lector de progreso
     progress_handle.await.unwrap();
+    let (current, min, max) = downloader.get_download_stats().await;
+    println!("Concurrencia final: {}/{}/{}", current, min, max);
 }
