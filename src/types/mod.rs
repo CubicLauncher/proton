@@ -302,18 +302,13 @@ impl VersionAssets {
     }
 
     /// Obtiene un asset específico por ruta
-    pub fn get_asset(&self, path: &str) -> Option<&Asset> {
-        self.objects.get(path)
-    }
+    // pub fn get_asset(&self, path: &str) -> Option<&Asset> {
+    //     self.objects.get(path)
+    // }
 
     /// Número total de assets
     pub fn len(&self) -> usize {
         self.objects.len()
-    }
-
-    /// Verifica si no hay assets
-    pub fn is_empty(&self) -> bool {
-        self.objects.is_empty()
     }
 }
 
