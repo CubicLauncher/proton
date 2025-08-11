@@ -1,5 +1,5 @@
 use crate::errors::ProtonError;
-use crate::manifest::{resolve_asset_index, resolve_version_in_manifest};
+use crate::manifest::{resolve_asset_index, resolve_version_data, resolve_version_in_manifest};
 use crate::types::{
     DownloadProgress, DownloadProgressInfo, DownloadProgressType, NormalizedVersion,
     RESOURCES_BASE_URL,
@@ -213,6 +213,7 @@ pub struct MinecraftDownloader {
     natives_dir: PathBuf,
     objects_dir: PathBuf,
     libraries_dir: PathBuf,
+    asset_index_dir: PathBuf,
     adaptive_config: Arc<Mutex<AdaptiveConfig>>,
 }
 
@@ -220,6 +221,7 @@ impl MinecraftDownloader {
     pub fn new(game_path: PathBuf, game_version: NormalizedVersion) -> Self {
         let natives_dir = game_path.join("natives").join(&game_version.id);
         let objects_dir = game_path.join("assets").join("objects");
+        let asset_index_dir = game_path.join("assets").join("indexes");
         let libraries_dir = game_path.join("libraries");
 
         Self {
@@ -228,6 +230,7 @@ impl MinecraftDownloader {
             natives_dir,
             objects_dir,
             libraries_dir,
+            asset_index_dir,
             adaptive_config: Arc::new(Mutex::new(AdaptiveConfig::new())),
         }
     }
@@ -257,23 +260,37 @@ impl MinecraftDownloader {
             self.adaptive_config.lock().await.current_concurrent
         );
 
-        let (natives_tx, libraries_tx, assets_tx, client_manifest_tx) = if progress_tx.is_some() {
-            let tx = progress_tx.as_ref().unwrap();
-            (
-                Some(tx.clone()),
-                Some(tx.clone()),
-                Some(tx.clone()),
-                Some(tx.clone()),
-            )
-        } else {
-            (None, None, None, None)
-        };
+        let (natives_tx, libraries_tx, assets_tx, client_manifest_tx, asset_index_tx) =
+            if progress_tx.is_some() {
+                let tx = progress_tx.as_ref().unwrap();
+                (
+                    Some(tx.clone()),
+                    Some(tx.clone()),
+                    Some(tx.clone()),
+                    Some(tx.clone()),
+                    Some(tx.clone()),
+                )
+            } else {
+                (None, None, None, None, None)
+            };
 
         // Clonar configuración para cada hilo
         let natives_config = Arc::clone(&self.adaptive_config);
         let libraries_config = Arc::clone(&self.adaptive_config);
         let assets_config = Arc::clone(&self.adaptive_config);
         let client_manifest_config = Arc::clone(&self.adaptive_config);
+        let asset_index_config = Arc::clone(&self.adaptive_config);
+
+        // Primero descargar el asset index antes que los assets
+        let asset_index_handle = {
+            let mut downloader = self.clone_for_asset_index();
+            downloader.adaptive_config = asset_index_config;
+            tokio::spawn(async move {
+                downloader
+                    .download_asset_index(&downloader.
+                    .await
+            })
+        };
 
         let natives_handle = {
             let mut downloader = self.clone_for_natives();
@@ -287,12 +304,6 @@ impl MinecraftDownloader {
             tokio::spawn(async move { downloader.download_libraries_internal(libraries_tx).await })
         };
 
-        let assets_handle = {
-            let mut downloader = self.clone_for_assets();
-            downloader.adaptive_config = assets_config;
-            tokio::spawn(async move { downloader.download_assets_internal(assets_tx).await })
-        };
-
         // Cliente y manifest en el mismo hilo
         let client_manifest_handle = {
             let mut downloader = self.clone_for_client();
@@ -302,6 +313,17 @@ impl MinecraftDownloader {
                     .download_client_and_manifest_internal(client_manifest_tx)
                     .await
             })
+        };
+
+        // Esperar a que se descargue el asset index primero
+        let asset_index_result = asset_index_handle.await;
+        asset_index_result??;
+
+        // Ahora descargar los assets
+        let assets_handle = {
+            let mut downloader = self.clone_for_assets();
+            downloader.adaptive_config = assets_config;
+            tokio::spawn(async move { downloader.download_assets_internal(assets_tx).await })
         };
 
         let (natives_result, libraries_result, assets_result, client_manifest_result) = tokio::join!(
@@ -358,6 +380,61 @@ impl MinecraftDownloader {
         if let Some(ref tx) = progress_tx {
             let info = DownloadProgressInfo {
                 name: format!("manifest-{version_id}"),
+                version: Arc::new(version_id.to_string()),
+            };
+
+            let _ = tx
+                .send(DownloadProgress {
+                    current: 1,
+                    total: 1,
+                    info,
+                    download_type: DownloadProgressType::Manifest,
+                })
+                .await;
+        }
+
+        Ok(())
+    }
+
+    pub async fn download_asset_index(
+        &self,
+        version_id: &str,
+        progress_tx: Option<Sender<DownloadProgress>>,
+    ) -> Result<(), ProtonError> {
+        let version = resolve_version_data(version_id).await?;
+
+        tokio::fs::create_dir_all(&self.asset_index_dir).await?;
+
+        let asset_index_path = self
+            .asset_index_dir
+            .join(format!("{}.json", version.asset_index.id));
+
+        if let Some(ref tx) = progress_tx {
+            let info = DownloadProgressInfo {
+                name: format!("asset-index-{}", version.asset_index.id),
+                version: Arc::new(version_id.to_string()),
+            };
+
+            let _ = tx
+                .send(DownloadProgress {
+                    current: 0,
+                    total: 1,
+                    info: info.clone(),
+                    download_type: DownloadProgressType::Manifest,
+                })
+                .await;
+        }
+
+        download_file(
+            version.asset_index.url,
+            &asset_index_path,
+            version.asset_index.sha1,
+        )
+        .await?;
+
+        if let Some(ref tx) = progress_tx {
+            let info = DownloadProgressInfo {
+                name: format!("asset-index-{}", version.asset_index.id),
                 version: Arc::new(version_id.to_string()),
             };
 
@@ -496,7 +573,6 @@ impl MinecraftDownloader {
         Ok(())
     }
 
-    /// Combina la descarga del client jar y el manifest de la versión en un solo hilo
     async fn download_client_and_manifest_internal(
         &self,
         progress_tx: Option<Sender<DownloadProgress>>,
@@ -581,6 +657,10 @@ impl MinecraftDownloader {
     }
 
     fn clone_for_client(&self) -> MinecraftDownloader {
+        MinecraftDownloader::new(self.game_path.clone(), self.game_version.clone())
+    }
+
+    fn clone_for_asset_index(&self) -> MinecraftDownloader {
         MinecraftDownloader::new(self.game_path.clone(), self.game_version.clone())
     }
 
