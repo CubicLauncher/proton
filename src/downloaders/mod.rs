@@ -287,7 +287,7 @@ impl MinecraftDownloader {
             downloader.adaptive_config = asset_index_config;
             tokio::spawn(async move {
                 downloader
-                    .download_asset_index(&downloader.
+                    .download_asset_index(&downloader.game_version.id.clone(), asset_index_tx)
                     .await
             })
         };
