@@ -18,7 +18,7 @@ pub async fn get_manifest() -> Result<MojangVersionManifest, ProtonError> {
 }
 
 pub async fn resolve_version_in_manifest(
-    version_id: String,
+    version_id: &str,
 ) -> Result<MojangVersionInfo, ProtonError> {
     let manifest = get_manifest().await?;
 
@@ -26,7 +26,7 @@ pub async fn resolve_version_in_manifest(
         .versions
         .into_iter()
         .find(|v| v.id == version_id)
-        .ok_or(ProtonError::VersionNotFound(version_id))
+        .ok_or(ProtonError::VersionNotFound(version_id.to_string()))
 }
 
 pub async fn resolve_version_data(version_id: String) -> Result<NormalizedVersion, ProtonError> {
