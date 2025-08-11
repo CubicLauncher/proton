@@ -29,7 +29,7 @@ pub async fn resolve_version_in_manifest(
         .ok_or(ProtonError::VersionNotFound(version_id.to_string()))
 }
 
-pub async fn resolve_version_data(version_id: String) -> Result<NormalizedVersion, ProtonError> {
+pub async fn resolve_version_data(version_id: &str) -> Result<NormalizedVersion, ProtonError> {
     let version_manifest = HTTP_CLIENT
         .get(MOJANG_MANIFEST_URL)
         .send()
@@ -42,7 +42,7 @@ pub async fn resolve_version_data(version_id: String) -> Result<NormalizedVersio
         .par_iter()
         .find_any(|version| version.id == version_id)
         .cloned()
-        .ok_or(ProtonError::VersionNotFound(version_id))?;
+        .ok_or(ProtonError::VersionNotFound(version_id.to_string()))?;
 
     let version = HTTP_CLIENT
         .get(version.url)
