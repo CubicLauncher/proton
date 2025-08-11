@@ -281,6 +281,7 @@ pub enum DownloadProgressType {
     Asset,
     Native,
     Client,
+    Manifest,
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone)]
@@ -301,7 +302,7 @@ impl VersionAssets {
         self.objects.drain().collect()
     }
 
-    /// Obtiene un asset específico por ruta
+    // Obtiene un asset específico por ruta
     // pub fn get_asset(&self, path: &str) -> Option<&Asset> {
     //     self.objects.get(path)
     // }

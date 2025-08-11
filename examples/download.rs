@@ -24,13 +24,17 @@ async fn main() {
                     "Descargando nativo: {}/{}",
                     progress.current, progress.total
                 ),
+                DownloadProgressType::Manifest => println!(
+                    "Descargando Manifesto: {}/{}",
+                    progress.current, progress.total
+                ),
             }
         }
     });
 
     let mut downloader = MinecraftDownloader::new(
         PathBuf::from("/tmp/minecraft"),
-        resolve_version_data("1.21.8".to_string()).await.unwrap(),
+        resolve_version_data("1.21.8").await.unwrap(),
     );
 
     downloader.download_all(Some(tx)).await.unwrap();

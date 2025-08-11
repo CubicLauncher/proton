@@ -1,5 +1,5 @@
 use crate::errors::ProtonError;
-use crate::manifest::resolve_asset_index;
+use crate::manifest::{resolve_asset_index, resolve_version_in_manifest};
 use crate::types::{
     DownloadProgress, DownloadProgressInfo, DownloadProgressType, NormalizedVersion,
     RESOURCES_BASE_URL,
@@ -257,7 +257,7 @@ impl MinecraftDownloader {
             self.adaptive_config.lock().await.current_concurrent
         );
 
-        let (natives_tx, libraries_tx, assets_tx, client_tx) = if progress_tx.is_some() {
+        let (natives_tx, libraries_tx, assets_tx, client_manifest_tx) = if progress_tx.is_some() {
             let tx = progress_tx.as_ref().unwrap();
             (
                 Some(tx.clone()),
@@ -273,7 +273,7 @@ impl MinecraftDownloader {
         let natives_config = Arc::clone(&self.adaptive_config);
         let libraries_config = Arc::clone(&self.adaptive_config);
         let assets_config = Arc::clone(&self.adaptive_config);
-        let client_config = Arc::clone(&self.adaptive_config);
+        let client_manifest_config = Arc::clone(&self.adaptive_config);
 
         let natives_handle = {
             let mut downloader = self.clone_for_natives();
@@ -293,29 +293,83 @@ impl MinecraftDownloader {
             tokio::spawn(async move { downloader.download_assets_internal(assets_tx).await })
         };
 
-        let client_handle = {
+        // Cliente y manifest en el mismo hilo
+        let client_manifest_handle = {
             let mut downloader = self.clone_for_client();
-            downloader.adaptive_config = client_config;
-            tokio::spawn(async move { downloader.download_client_internal(client_tx).await })
+            downloader.adaptive_config = client_manifest_config;
+            tokio::spawn(async move {
+                downloader
+                    .download_client_and_manifest_internal(client_manifest_tx)
+                    .await
+            })
         };
 
-        let (natives_result, libraries_result, assets_result, client_result) = tokio::join!(
+        let (natives_result, libraries_result, assets_result, client_manifest_result) = tokio::join!(
             natives_handle,
             libraries_handle,
             assets_handle,
-            client_handle
+            client_manifest_handle
         );
 
         natives_result??;
         libraries_result??;
         assets_result??;
-        client_result??;
+        client_manifest_result??;
 
         let final_config = self.adaptive_config.lock().await;
         println!(
             "Downloads completed with final concurrency: {}",
             final_config.current_concurrent
         );
+
+        Ok(())
+    }
+
+    pub async fn download_version_manifest(
+        &self,
+        version_id: &str,
+        progress_tx: Option<Sender<DownloadProgress>>,
+    ) -> Result<(), ProtonError> {
+        let version = resolve_version_in_manifest(version_id).await?;
+
+        let version_dir = self.game_path.join("versions").join(version_id);
+        tokio::fs::create_dir_all(&version_dir).await?;
+
+        let manifest_path = version_dir.join(format!("{}.json", version_id));
+
+        if let Some(ref tx) = progress_tx {
+            let info = DownloadProgressInfo {
+                name: format!("manifest-{}", version_id),
+                version: Arc::new(version_id.to_string()),
+            };
+
+            let _ = tx
+                .send(DownloadProgress {
+                    current: 0,
+                    total: 1,
+                    info: info.clone(),
+                    download_type: DownloadProgressType::Manifest,
+                })
+                .await;
+        }
+
+        download_file(version.url, &manifest_path, version.sha1).await?;
+
+        if let Some(ref tx) = progress_tx {
+            let info = DownloadProgressInfo {
+                name: format!("manifest-{}", version_id),
+                version: Arc::new(version_id.to_string()),
+            };
+
+            let _ = tx
+                .send(DownloadProgress {
+                    current: 1,
+                    total: 1,
+                    info,
+                    download_type: DownloadProgressType::Manifest,
+                })
+                .await;
+        }
 
         Ok(())
     }
@@ -442,20 +496,24 @@ impl MinecraftDownloader {
         Ok(())
     }
 
-    async fn download_client_internal(
+    /// Combina la descarga del client jar y el manifest de la versión en un solo hilo
+    async fn download_client_and_manifest_internal(
         &self,
         progress_tx: Option<Sender<DownloadProgress>>,
     ) -> Result<(), ProtonError> {
         let client_info = self.game_version.client_jar.clone();
-        let total = 1;
+        let version_id = &self.game_version.id;
+        let total = 2; // client + manifest
+
         let (semaphore, completed, mut tasks, game_version_arc, _) =
             create_adaptive_infrastructure!(total, self.game_version.id, self.adaptive_config);
 
-        let client_path = self
-            .game_path
-            .join("versions")
-            .join(&self.game_version.id)
-            .join(format!("{}.jar", self.game_version.id));
+        // Crear directorios necesarios
+        let version_dir = self.game_path.join("versions").join(version_id);
+        tokio::fs::create_dir_all(&version_dir).await?;
+
+        // 1. Tarea para descargar el client jar
+        let client_path = version_dir.join(format!("{}.jar", version_id));
 
         create_monitored_task!(
             tasks,
@@ -466,20 +524,44 @@ impl MinecraftDownloader {
             self.adaptive_config,
             total,
             DownloadProgressType::Client,
-            format!("minecraft-{}", self.game_version.id),
+            format!("minecraft-{}", version_id),
             client_info.url,
             client_path,
             client_info.sha1,
             Ok::<(), ProtonError>(())
         );
 
+        // 2. Tarea para descargar el manifest de la versión específica
+        let manifest_path = version_dir.join(format!("{}.json", version_id));
+
+        // Resolver la información del manifest de la versión específica
+        let version_info = resolve_version_in_manifest(version_id).await?;
+
+        create_monitored_task!(
+            tasks,
+            semaphore,
+            completed,
+            progress_tx,
+            game_version_arc,
+            self.adaptive_config,
+            total,
+            DownloadProgressType::Manifest,
+            format!("manifest-{}", version_id),
+            version_info.url,
+            manifest_path,
+            version_info.sha1,
+            Ok::<(), ProtonError>(())
+        );
+
+        // Ejecutar ambas tareas concurrentemente
         while let Some(res) = tasks.next().await {
             res??;
         }
+
         Ok(())
     }
 
-    // Métodos de clonación (sin cambios)
+    // Métodos de clonación
     fn clone_for_natives(&self) -> MinecraftDownloader {
         let mut cloned =
             MinecraftDownloader::new(self.game_path.clone(), self.game_version.clone());

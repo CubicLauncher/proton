@@ -1,7 +1,6 @@
 use crate::errors::ProtonError;
 use async_zip::tokio::read::fs::ZipFileReader;
 use futures::TryStreamExt;
-use hex;
 use log::{error, info, warn};
 use once_cell::sync::Lazy;
 use reqwest::Client;
@@ -70,7 +69,7 @@ pub async fn download_file(
         // Crear directorio padre si no existe
         if let Some(parent_dir) = path.parent() {
             if let Err(e) = create_dir_all(parent_dir).await {
-                error!("Failed to create directory {:?}: {}", parent_dir, e);
+                error!("Failed to create directory {parent_dir:?}: {e}");
                 return Err(ProtonError::IoError(e));
             }
         }
@@ -90,7 +89,7 @@ pub async fn download_file(
                 resp
             }
             Err(e) => {
-                warn!("Request failed on attempt {}: {}", attempt, e);
+                warn!("Request failed on attempt {attempt}: {e}");
                 if attempt == MAX_DOWNLOAD_ATTEMPTS {
                     return Err(ProtonError::RequestError(e));
                 }
@@ -102,7 +101,7 @@ pub async fn download_file(
         let mut file = match File::create(&temp_file).await {
             Ok(f) => f,
             Err(e) => {
-                error!("Failed to create temp file {:?}: {}", temp_file, e);
+                error!("Failed to create temp file {temp_file:?}: {e}");
                 return Err(ProtonError::IoError(e));
             }
         };
@@ -137,11 +136,11 @@ pub async fn download_file(
                     // Mover archivo temporal al destino final
                     match rename(&temp_file, &path).await {
                         Ok(()) => {
-                            info!("File downloaded successfully: {:?}", path);
+                            info!("File downloaded successfully: {path:?}");
                             return Ok(());
                         }
                         Err(e) => {
-                            error!("Failed to rename temp file: {}", e);
+                            error!("Failed to rename temp file: {e}");
                             let _ = remove_file(&temp_file).await;
                             return Err(ProtonError::IoError(e));
                         }
@@ -154,7 +153,7 @@ pub async fn download_file(
                 }
             }
             Err(e) => {
-                warn!("Write error on attempt {}: {}", attempt, e);
+                warn!("Write error on attempt {attempt}: {e}");
                 if attempt == MAX_DOWNLOAD_ATTEMPTS {
                     // Limpiar archivo temporal antes de retornar error
                     let _ = remove_file(&temp_file).await;
@@ -166,7 +165,7 @@ pub async fn download_file(
         // Limpiar archivo temporal antes del siguiente intento
         if temp_file.exists() {
             if let Err(e) = remove_file(&temp_file).await {
-                warn!("Failed to remove temp file: {}", e);
+                warn!("Failed to remove temp file: {e}");
             }
         }
 
@@ -260,7 +259,7 @@ pub fn get_os_name_runtime() -> &'static str {
 
         // Otros no soportados
         other => {
-            println!("⚠️ OS no reconocido: {:?}", other);
+            println!("⚠️ OS no reconocido: {other:?}");
             "unknown"
         }
     }
