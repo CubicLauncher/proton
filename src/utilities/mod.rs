@@ -5,7 +5,7 @@ use log::{error, info, warn};
 use once_cell::sync::Lazy;
 use reqwest::Client;
 use ring::digest::{Context, SHA1_FOR_LEGACY_USE_ONLY};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use tokio::{
     fs::{File, create_dir_all, remove_file, rename},
     io::{AsyncReadExt, AsyncWriteExt},
@@ -35,35 +35,32 @@ pub async fn download_file(
 
     // Verificar si el archivo ya existe y tiene el hash correcto
     if path.exists() {
-        info!("File already exists, verifying hash: {:?}", path);
+        info!("File already exists, verifying hash: {path:?}");
 
         match verify_file_hash(path, &expected_hash).await {
             Ok(true) => {
-                info!("File already exists with correct hash: {:?}", path);
+                info!("File already exists with correct hash: {path:?}");
                 return Ok(());
             }
             Ok(false) => {
-                warn!(
-                    "File exists but hash doesn't match, re-downloading: {:?}",
-                    path
-                );
+                warn!("File exists but hash doesn't match, re-downloading: {path:?}");
                 // Eliminar archivo corrupto
                 if let Err(e) = remove_file(path).await {
-                    warn!("Failed to remove corrupted file: {}", e);
+                    warn!("Failed to remove corrupted file: {e}");
                 }
             }
             Err(e) => {
-                warn!("Failed to verify existing file hash: {}, re-downloading", e);
+                warn!("Failed to verify existing file hash: {e}, re-downloading");
                 // Eliminar archivo que no se puede verificar
                 if let Err(e) = remove_file(path).await {
-                    warn!("Failed to remove unverifiable file: {}", e);
+                    warn!("Failed to remove unverifiable file: {e}");
                 }
             }
         }
     }
 
     // Generar nombre único para archivo temporal
-    let temp_file = path.with_extension(&format!("tmp.{}", uuid::Uuid::new_v4()));
+    let temp_file = path.with_extension(format!("tmp.{}", uuid::Uuid::new_v4()));
 
     for attempt in 1..=MAX_DOWNLOAD_ATTEMPTS {
         // Crear directorio padre si no existe
@@ -147,8 +144,7 @@ pub async fn download_file(
                     }
                 } else {
                     warn!(
-                        "Hash mismatch on attempt {}: expected {}, got {}",
-                        attempt, expected_hash, actual_hash
+                        "Hash mismatch on attempt {attempt}: expected {expected_hash}, got {actual_hash}"
                     );
                 }
             }
@@ -200,7 +196,7 @@ async fn verify_file_hash(path: &PathBuf, expected_hash: &str) -> Result<bool, P
     Ok(actual_hash == expected_hash)
 }
 
-pub async fn extract_native(jar_path: &PathBuf, destino: &PathBuf) -> Result<(), ProtonError> {
+pub async fn extract_native(jar_path: &Path, destino: &Path) -> Result<(), ProtonError> {
     // Abrir zip
     let reader = ZipFileReader::new(jar_path).await?;
 

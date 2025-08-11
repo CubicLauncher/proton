@@ -32,6 +32,6 @@ impl From<Box<dyn std::error::Error + Send + Sync>> for ProtonError {
 
 impl From<async_zip::error::ZipError> for ProtonError {
     fn from(err: async_zip::error::ZipError) -> Self {
-        ProtonError::Other(format!("Zip extraction error: {}", err))
+        ProtonError::Other(format!("Zip extraction error: {err}"))
     }
 }

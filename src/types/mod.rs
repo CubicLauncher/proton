@@ -298,7 +298,7 @@ pub struct Asset {
 // Implementación de utilidad para VersionAssets
 impl VersionAssets {
     /// Obtiene todos los assets como vector de tuplas (ruta, asset)
-    pub fn as_vec(mut self) -> Vec<(String, Asset)> {
+    pub fn into_vec(mut self) -> Vec<(String, Asset)> {
         self.objects.drain().collect()
     }
 
@@ -417,10 +417,7 @@ fn library_applies(lib: &MojangLibrary) -> bool {
 
     for rule in &lib.rules {
         let applies = match &rule.os {
-            Some(os_rule) => {
-                let name_match = os_rule.name.as_ref().map_or(true, |n| n == os_name);
-                name_match
-            }
+            Some(os_rule) => os_rule.name.as_ref().is_none_or(|n| n == os_name),
             None => true,
         };
 
@@ -481,7 +478,7 @@ fn rule_set_applies(rules: &[MojangRule], os_name: &str) -> bool {
 
     for rule in rules {
         let applies = match &rule.os {
-            Some(os_rule) => os_rule.name.as_ref().map_or(true, |n| n == os_name),
+            Some(os_rule) => os_rule.name.as_ref().is_none_or(|n| n == os_name),
             None => true,
         };
 

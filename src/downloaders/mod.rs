@@ -42,7 +42,7 @@ impl AdaptiveConfig {
 
     fn conservative() -> Self {
         let mut config = Self::new();
-        config.max_concurrent = config.max_concurrent / 2;
+        config.max_concurrent /= 2;
         config.current_concurrent = 4;
         config.min_concurrent = 2;
         config.performance_threshold_ms = 2000;
@@ -51,7 +51,7 @@ impl AdaptiveConfig {
 
     fn aggressive() -> Self {
         let mut config = Self::new();
-        config.max_concurrent = config.max_concurrent * 2;
+        config.max_concurrent *= 2;
         config.current_concurrent = config.max_concurrent / 2;
         config.min_concurrent = 8;
         config.performance_threshold_ms = 500;
@@ -335,11 +335,11 @@ impl MinecraftDownloader {
         let version_dir = self.game_path.join("versions").join(version_id);
         tokio::fs::create_dir_all(&version_dir).await?;
 
-        let manifest_path = version_dir.join(format!("{}.json", version_id));
+        let manifest_path = version_dir.join(format!("{version_id}.json"));
 
         if let Some(ref tx) = progress_tx {
             let info = DownloadProgressInfo {
-                name: format!("manifest-{}", version_id),
+                name: format!("manifest-{version_id}"),
                 version: Arc::new(version_id.to_string()),
             };
 
@@ -357,7 +357,7 @@ impl MinecraftDownloader {
 
         if let Some(ref tx) = progress_tx {
             let info = DownloadProgressInfo {
-                name: format!("manifest-{}", version_id),
+                name: format!("manifest-{version_id}"),
                 version: Arc::new(version_id.to_string()),
             };
 
@@ -466,10 +466,10 @@ impl MinecraftDownloader {
         let (semaphore, completed, mut tasks, game_version_arc, _) =
             create_adaptive_infrastructure!(total, self.game_version.id, self.adaptive_config);
 
-        for (name, asset) in asset_index.as_vec() {
+        for (name, asset) in asset_index.into_vec() {
             let hash = &asset.hash;
             let subhash: String = hash.chars().take(2).collect();
-            let url = format!("{}/{}/{}", RESOURCES_BASE_URL, subhash, hash);
+            let url = format!("{RESOURCES_BASE_URL}/{subhash}/{hash}");
             let path = self.objects_dir.join(&subhash).join(hash);
             let hash_string = hash.to_string();
 
@@ -513,7 +513,7 @@ impl MinecraftDownloader {
         tokio::fs::create_dir_all(&version_dir).await?;
 
         // 1. Tarea para descargar el client jar
-        let client_path = version_dir.join(format!("{}.jar", version_id));
+        let client_path = version_dir.join(format!("{version_id}.jar"));
 
         create_monitored_task!(
             tasks,
@@ -532,7 +532,7 @@ impl MinecraftDownloader {
         );
 
         // 2. Tarea para descargar el manifest de la versión específica
-        let manifest_path = version_dir.join(format!("{}.json", version_id));
+        let manifest_path = version_dir.join(format!("{version_id}.json"));
 
         // Resolver la información del manifest de la versión específica
         let version_info = resolve_version_in_manifest(version_id).await?;
